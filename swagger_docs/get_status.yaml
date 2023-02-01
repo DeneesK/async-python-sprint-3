@@ -1,0 +1,10 @@
+---
+tags:
+- Server Status
+summary: Send server status
+description: Sends server status and number of connected clients.
+produces:
+  - text/plain
+responses:
+  "200":
+    description: status and number of connected clients

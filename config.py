@@ -10,3 +10,11 @@ LOGGER_SETTINGS = {
 BUFFER_SIZE = 30
 
 FILEPATH = 'client.json'
+
+MSG_LIMIT = 20
+
+LIMIT_UPDATE_PERIOD = 60 * 60  # seconds
+
+SIZE_LIMIT = 5000 * 1000  # bytes
+
+TITLE = 'Server Chat API'

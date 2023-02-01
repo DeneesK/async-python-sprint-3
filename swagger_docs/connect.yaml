@@ -1,0 +1,21 @@
+---
+tags:
+- Connect to server
+summary: Place client in the connected list
+description: Receives a request from a client. Serializes a request with client data in to the ServerClientModel and places it in the list of connected clients.
+produces:
+  - text/plain
+parameters:
+- in: body
+  name: body
+  required: true
+  schema:
+    type: object
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+responses:
+  "200":
+    description: Connected

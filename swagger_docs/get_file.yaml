@@ -1,0 +1,17 @@
+---
+tags:
+- Files Handleres
+summary: get and store file
+description: Receives and saves a file to disks for later sending to connected clients. Can store only one file per user. When a new file is received, it overwrites the user's old stored file.
+parameters:
+- in: body
+  name: body
+  required: true
+  schema:
+    type: object
+    properties:
+      file_info:
+        type: string
+responses:
+  "200":
+    description: OK

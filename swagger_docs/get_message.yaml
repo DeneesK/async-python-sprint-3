@@ -1,0 +1,21 @@
+---
+tags:
+- Message Handleres
+summary: get and store message from user to all users
+description: Receives a message from the client intended for all clients and serializes it into a MessageModel, then stores it in the message buffer.
+parameters:
+- in: body
+  name: body
+  required: true
+  schema:
+    type: object
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      msg:
+        type: string
+responses:
+  "200":
+    description: OK

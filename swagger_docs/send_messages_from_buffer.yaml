@@ -1,0 +1,19 @@
+---
+tags:
+- Message Handleres
+summary: send last messages for just connected user
+description: Sends all messages from the message buffer to a newly connected client. And also saves in the ServerClientModel the id of the last message sent to the client.
+parameters:
+- in: body
+  name: body
+  required: true
+  schema:
+    type: object
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+responses:
+  "200":
+    description: OK
