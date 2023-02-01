@@ -30,6 +30,7 @@ class Client:
         self.commands = {'@to': self.send_to, '@close': self.close, '@file': self.send_file}
 
     async def send(self, message: str) -> None:
+        """Send message to all users"""
         path = self.base_path + 'send'
         try:
             msg = MessageModel(name=self.name, id=self.id, msg=message)
@@ -40,6 +41,7 @@ class Client:
             logger.error(ex)
 
     async def send_to(self, data: list) -> None:
+        """Send message for certain user"""
         path = self.base_path + 'send-to'
         try:
             to_user = data[1]
@@ -68,6 +70,7 @@ class Client:
         return False
 
     async def send_file(self, data: list) -> None:
+        """Send file to all users"""
         path = self.base_path + 'send-file'
         if await self.check_file_size(data[1]):
             try:
@@ -92,6 +95,7 @@ class Client:
         return True
 
     async def get_file(self):
+        """Downloade files sent by users"""
         path = self.base_path + 'get-file'
         while not self.sesion.closed:
             try:
@@ -106,6 +110,7 @@ class Client:
             await asyncio.sleep(2)
 
     async def get_messages_from_server_at_start(self) -> None:
+        """Gets all latest messages on first connection"""
         path = self.base_path + 'get-messages'
         try:
             resp = await self.sesion.post(path, data=self.client_model.json())
@@ -116,6 +121,7 @@ class Client:
             logger.error(ex)
 
     async def get_command_from_user(self) -> None:
+        """Handle commands from user"""
         while not self.sesion.closed:
             try:
                 msg = await aioconsole.ainput()
@@ -129,6 +135,7 @@ class Client:
                 logger.error(ex)
 
     async def get_update(self) -> None:
+        """Get last unreceived messages"""
         path = self.base_path + 'get-update'
         while not self.sesion.closed:
             try:
@@ -164,6 +171,7 @@ class Client:
         asyncio.run(self.start())
 
     async def close(self, *_) -> None:
+        """Close connection and event loop"""
         path = self.base_path + 'close'
         await self.sesion.post(path, data=self.client_model.json())
         logger.info('Disconnected from the chat')

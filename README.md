@@ -11,7 +11,7 @@ http://127.0.0.1:8000/api/v1/doc
 
 #### launch client:
 `python client.py`
-
+Enters the name is necessary only at the first start of the program. Client saves you data.
 #### then:
 To send a message to all users, simply type it into the console and press Enter
 
