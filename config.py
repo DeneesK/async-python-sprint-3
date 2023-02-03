@@ -1,20 +1,14 @@
-import logging
+from pydantic import BaseSettings, Field
 
 
-LOGGER_SETTINGS = {
-    "format": "%(asctime)s  - %(levelname)s - %(message)s",
-    "datefmt": "%Y-%m-%d %H:%M:%S",
-    "level": logging.INFO
-}
+class Settings(BaseSettings):
+    buffer_size: int = Field(20)
+    client_info_filepath: str = Field('client.json')
+    limit_update_period: int = Field(60 * 60)  # seconds
+    file_size_limit: int = Field(5000 * 1000)  # bytes
+    client_host: str = Field('http://127.0.0.1')
+    server_host: str = Field('127.0.0.1')
+    port: int = Field(8000)
 
-BUFFER_SIZE = 30
 
-FILEPATH = 'client.json'
-
-MSG_LIMIT = 20
-
-LIMIT_UPDATE_PERIOD = 60 * 60  # seconds
-
-SIZE_LIMIT = 5000 * 1000  # bytes
-
-TITLE = 'Server Chat API'
+settings = Settings()

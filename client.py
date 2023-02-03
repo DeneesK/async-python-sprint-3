@@ -1,4 +1,3 @@
-import re
 import os
 import json
 import uuid
@@ -8,117 +7,78 @@ import logging
 import aioconsole
 from aiohttp import ClientSession
 
-from config import LOGGER_SETTINGS, FILEPATH, SIZE_LIMIT
+from logger_ import logging
 from models import MessageModel, ClientModel
+from config import settings
 
 
-logging.basicConfig(**LOGGER_SETTINGS)
 logger = logging.getLogger(__name__)
 
 
 class Client:
-    def __init__(self, server_host="http://127.0.0.1", server_port=8000, client_session: ClientSession = ClientSession) -> None:
+    def __init__(self, server_host=settings.client_host,
+                 server_port=settings.port,
+                 client_session: ClientSession = ClientSession) -> None:
         self.name = None
         self.id = str(uuid.uuid4())
-        self.allow_download_files = False
         self.client_model = None
         self.server_host = server_host
         self.server_port = server_port
         self.base_path = r'{0}:{1}/'.format(self.server_host, self.server_port)
         self.client_session = client_session
         self.sesion = None
-        self.commands = {'@to': self.send_to, '@close': self.close, '@file': self.send_file}
+        self.commands = {'@to': self.send_to, '@close': self.close}
 
-    async def send(self, message: str) -> None:
+    async def send(self, msg: str) -> None:
         """Send message to all users"""
         path = self.base_path + 'send'
+        message = f'{self.name}: {msg}'
         try:
-            msg = MessageModel(name=self.name, id=self.id, msg=message)
-            resp = await self.sesion.post(path, data=msg.json())
+            msg_model = MessageModel(name=self.name, id=self.id, msg=message)
+            resp = await self.sesion.post(path, data=msg_model.json())
             if await resp.text():
                 print(await resp.text())
         except Exception as ex:
             logger.error(ex)
 
-    async def send_to(self, data: list) -> None:
+    async def send_to(self, data: str) -> None:
         """Send message for certain user"""
-        path = self.base_path + 'send-to'
+        path = self.base_path + 'sendto'
+        _, to_user, message = data.split(' ')
         try:
-            to_user = data[1]
-            message = data[2]
             msg = MessageModel(name=self.name, id=self.id, msg=message, to_user=to_user)
-            resp = await self.sesion.post(path, data=msg.dict())
-            if await resp.text():
-                print(await resp.text())
+            await self.sesion.post(path, data=msg.json())
         except Exception as ex:
             logger.error(ex)
-
-    def read_file(self, filepath: str):
-        with open(filepath, 'rb') as file:
-            data = file.read()
-        return data
-
-    async def write_file(self, data: bytes, filename: str) -> None:
-        with open(filename, 'wb') as file:
-            file.write(data)
-        lst = filename.split('-')
-        print(f'***Downloaded file from [{lst[1]}]')
-
-    async def check_file_size(self, filepath) -> bool:
-        if os.path.getsize(filepath) < SIZE_LIMIT:
-            return True
-        return False
-
-    async def send_file(self, data: list) -> None:
-        """Send file to all users"""
-        path = self.base_path + 'send-file'
-        if await self.check_file_size(data[1]):
-            try:
-                file = self.read_file(data[1])
-                file_format = data[1].split('.')[-1]
-                # Отправка файла возможна только в формате dict -> {'file_info': bytes}
-                await self.sesion.post(path, data={f'{self.name} {self.id} {file_format}': file})
-            except Exception as ex:
-                logger.info(ex)
-        else:
-            print(f'!!!File is too large. Max size {SIZE_LIMIT} bytes')
 
     async def connect(self) -> None:
         path = self.base_path + 'connect'
         try:
             self.sesion = self.client_session()
             resp = await self.sesion.post(path, data=self.client_model.json())
-            status = await resp.text()
-            logger.info(f'Connectection status: {status}')
+            logger.info('Connectection status: OK')
+            text = await resp.text()
+            print(text)
         except Exception as ex:
             logger.error(ex)
-        return True
 
-    async def get_file(self):
-        """Downloade files sent by users"""
-        path = self.base_path + 'get-file'
+    async def get_update(self) -> None:
+        """Get last unreceived messages"""
+        path = self.base_path + 'getupdate'
         while not self.sesion.closed:
             try:
                 resp = await self.sesion.post(path, data=self.client_model.json())
-                data = await resp.read()
-                if data:
-                    filename = re.findall(b'\w*-\w*-\w*-\w*-\w*-\w*-\w*\.\w*', data)[0]  # noqa: W605
-                    data = data[len(filename):]
-                    await self.write_file(data, filename.decode())
+                text = await resp.text()
+                if text and not text.startswith(self.name):
+                    print(await resp.text())
+                await asyncio.sleep(1)
             except Exception as ex:
                 logger.error(ex)
-            await asyncio.sleep(2)
 
-    async def get_messages_from_server_at_start(self) -> None:
-        """Gets all latest messages on first connection"""
-        path = self.base_path + 'get-messages'
-        try:
-            resp = await self.sesion.post(path, data=self.client_model.json())
-            text = await resp.text()
-            if text and not text.startswith(self.name):
-                print(await resp.text())
-        except Exception as ex:
-            logger.error(ex)
+    async def parse_command(self, msg: str) -> str:
+        lst = msg.split(' ')
+        command = lst[0]
+        return command
 
     async def get_command_from_user(self) -> None:
         """Handle commands from user"""
@@ -126,48 +86,38 @@ class Client:
             try:
                 msg = await aioconsole.ainput()
                 if msg.startswith('@'):
-                    lst = msg.split(' ')
-                    if coro := self.commands.get(lst[0]):
-                        await coro(lst)
+                    command = await self.parse_command(msg)
+                    coro = self.commands.get(command)
+                    await coro(msg)
                 else:
                     await self.send(msg)
             except Exception as ex:
                 logger.error(ex)
 
-    async def get_update(self) -> None:
-        """Get last unreceived messages"""
-        path = self.base_path + 'get-update'
-        while not self.sesion.closed:
-            try:
-                resp = await self.sesion.post(path, data=self.client_model.json())
-                text = await resp.text()
-                if text and not text.startswith(self.name):
-                    print(await resp.text())
-                await asyncio.sleep(0.3)
-            except Exception as ex:
-                logger.error(ex)
-
     async def start(self) -> None:
-        if await self.connect():
-            await self.get_messages_from_server_at_start()
-            if self.allow_download_files:
-                await asyncio.gather(self.get_command_from_user(), self.get_file())
-            else:
-                await asyncio.gather(self.get_command_from_user())
+        """Sends a connection request and starts an event loop"""
+        await self.connect()
+        await asyncio.gather(self.get_update(), self.get_command_from_user())
+
+    def create_user(self) -> None:
+        self.name = input('Enter your name: ')
+        if not self.name:
+            self.name = self.id
+        self.client_model = ClientModel(name=self.name, id=self.id)
+        with open(settings.client_info_filepath, 'w') as file:
+            json.dump(self.client_model.dict(), file)
 
     def run(self) -> None:
-        if os.path.exists(FILEPATH + '1'):
-            self.client_model = ClientModel.parse_file(FILEPATH)
+        """
+        Checks whether there is already a created user for this Client (checks for the presence of client.json),
+        if there is none, it offers to create it.
+        """
+        if os.path.exists(settings.client_info_filepath):
+            self.client_model = ClientModel.parse_file(settings.client_info_filepath)
+            self.name = self.client_model.name
+            self.id = self.client_model.id
         else:
-            self.name = input('Enter your name: ')
-            if not self.name:
-                self.name = self.id
-            answer = input('Allow to download files from users?[y/n]: ')
-            if answer.lower() == 'y':
-                self.allow_download_files = True
-            self.client_model = ClientModel(name=self.name, id=self.id)
-            with open(FILEPATH, 'w') as file:
-                json.dump(self.client_model.dict(), file)
+            self.create_user()
         asyncio.run(self.start())
 
     async def close(self, *_) -> None:

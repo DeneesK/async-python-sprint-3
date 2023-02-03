@@ -1,25 +1,95 @@
 ## Server API
 
-#### launch server:
+##### launch server:
 `python server.py`
 
-#### then
+##### then:
 
-http://127.0.0.1:8000/api/v1/doc
+`POST \connect`
+<details>
+<summary> Description </summary>
+
+##### Requires:
+`{'name': string, 'id': string}`
+
+Creates a new user object and places it in the list of connected clients, if the user has previously connected, puts the previously created object in the list of connected clients.
+
+</details>
+
+------------------------------------------------------
+
+`POST \getupdate`
+<details>
+<summary> Description </summary>
+
+##### Requires:
+`{'name': string, 'id': string}`
+
+Get last unreceived messages(private and not) and marks last send message id for user
+
+</details>
+
+------------------------------------------------------
+
+`POST \send`
+<details>
+<summary> Description </summary>
+
+##### Requires:
+`{'name': string, 'id': string, 'msg': string}`
+
+Send message to all users
+
+</details>
+
+------------------------------------------------------
+
+`POST \sendto`
+<details>
+<summary> Description </summary>
+
+##### Requires:
+`{'name': string, 'id': string, 'msg': string, 'to_user': string}`
+
+Send message to certain user
+
+</details>
+
+------------------------------------------------------
+
+`GET \status`
+<details>
+<summary> Description </summary>
+
+Get status of server and number connected clients
+
+</details>
+
+------------------------------------------------------
+
+`POST \close`
+<details>
+<summary> Description </summary>
+
+##### Requires:
+`{'name': string, 'id': string, 'msg': string}`
+
+Delete user fro connected clients list
+
+</details>
 
 ## Client API
 
-#### launch client:
+##### launch client:
 `python client.py`
 Enters the name is necessary only at the first start of the program. Client saves you data.
-#### then:
+##### then:
 To send a message to all users, simply type it into the console and press Enter
 
 #### list of commands:
 <i>enter commands directly in the console</i>
 1. `@to [user_name]` - send a private message to a user, visible only to him/her
-2. `@file [file_path]` - send file to all users
-3. `@close` - correct way to terminate Chat Client
+2. `@close` - correct way to terminate Chat Client
 
 # Проектное задание третьего спринта
 
@@ -79,14 +149,14 @@ POST /send
 ### Дополнительные требования (отметить [Х] выбранные пункты):
 
 - [ ] (1 балл) Период жизни доставленных сообщений — 1 час (по умолчанию).
-- [x] (1 балл) Клиент может отправлять не более 20 (по умолчанию) сообщений в общий чат в течение определенного периода - 1 час (по умолчанию). В конце каждого периода лимит обнуляется;
+- [ ] (1 балл) Клиент может отправлять не более 20 (по умолчанию) сообщений в общий чат в течение определенного периода - 1 час (по умолчанию). В конце каждого периода лимит обнуляется;
 - [ ] (1 балл) Возможность комментировать сообщения;
 - [ ] (2 балла) Возможность создавать сообщения с заранее указанным временем отправки; созданные, но неотправленные сообщения можно отменить;
 - [ ] (2 балла) Возможность пожаловаться на пользователя. При достижении лимита в 3 предупреждения, пользователь становится "забанен" - невозможность отправки сообщений в течение 4 часов (по умолчанию);
-- [x] (3 балла) Возможность отправлять файлы различного формата (объёмом не более 5Мб, по умолчанию).
+- [ ] (3 балла) Возможность отправлять файлы различного формата (объёмом не более 5Мб, по умолчанию).
 - [ ] (3 балла) Пользователь может подключиться с двух и более клиентов одновременно. Состояния должны синхронизироваться между клиентами.
 - [ ] (3 балла) Возможность создавать кастомные приватные чаты и приглашать в него других пользователей. Неприглашенный пользователь может "войти" в такой чат только по сгенерированной ссылке и после подтверждения владельцем чата. 
-- [ ] **(5 баллов) Реализовать кастомную реализацию для взаимодействия по протоколу `http` (можно использовать `asyncio.streams`);
+- [x] **(5 баллов) Реализовать кастомную реализацию для взаимодействия по протоколу `http` (можно использовать `asyncio.streams`);
 
 
 ## Требования к решению

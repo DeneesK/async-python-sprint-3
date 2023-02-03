@@ -1,199 +1,170 @@
-import os
 import re
-import time
-import logging
+import json
+import asyncio
+from asyncio.streams import StreamReader, StreamWriter
 
-from aiohttp_swagger import setup_swagger, swagger_path
-from aiohttp import web
-from aiohttp.web import Response, Application, Request
-
-from config import LOGGER_SETTINGS, BUFFER_SIZE, MSG_LIMIT, LIMIT_UPDATE_PERIOD, TITLE
-from models import MessageModel, ServersClientModel
+from logger_ import logging
+from config import settings
+from models import ServersClientModel, Request, Response, MessageModel
 
 
-logging.basicConfig(**LOGGER_SETTINGS)
 logger = logging.getLogger(__name__)
 
 
 class Server:
-    def __init__(self, host="127.0.0.1", port=8000, app: Application = Application(), server: web = web) -> None:
+    def __init__(self, host: str = settings.server_host,
+                 port: int = settings.port,
+                 msg_limit: int = settings.buffer_size) -> None:
         self.host = host
         self.port = port
-        self.app = app
-        self.server = server
-        self.connected_clients = []
-        self.messages_bufer = []
+        self.msg_buffer_limit = msg_limit
         self.msg_id = 0
-        self.client_id_of_last_received_msg = {}
-        self.msg_to_user = {}
-        self.sent_files_to_user = {}
-        self.files = []
+        self.msg_buffer = []
+        self.connected_clients = {}
+        self.disconnected_clients = {}
+        self.private_message = {}
+        self.routes = {
+            '/connect': self.connect,
+            '/send': self.send,
+            '/sendto': self.send_to,
+            '/getupdate': self.get_update,
+            '/status': self.get_status,
+            '/close': self.close,
+        }
 
-    @swagger_path('swagger_docs/get_status.yaml')
-    async def send_status(self, request: Request) -> Response:
-        number = len(self.connected_clients)
-        return Response(text=f'Status: OK. There is/are {number} user/s in the chat')
+    def add_message_to_buffer(self, message: MessageModel) -> None:
+        if len(self.msg_buffer) >= self.msg_buffer_limit:
+            self.msg_buffer.pop()
+        self.msg_buffer.append(message)
 
-    @swagger_path('swagger_docs/connect.yaml')
+    async def parse_request(self, reader: StreamReader) -> Request:
+        try:
+            head = await reader.readuntil(separator=b'\r\n\r\n')
+        except Exception as ex:
+            logger.error(ex)
+            raw = re.findall(b'\w*\s/\w*\s\w*/\d.\d', head)  # noqa: W605
+            method, path, *_ = raw[0].decode().split(' ')
+        if method.upper() == 'GET':
+            return Request(method=method, path=path)
+        try:
+            body = await reader.readuntil(separator=b'}')
+        except Exception as ex:
+            logger.error(ex)
+        return Request(method=method, path=path, body=body)
+
+    async def on_connect_get_updates(self, client: ServersClientModel) -> str:
+        """Send unreceived messages to user with a new connection of an existing user"""
+        text = ''
+        for msg in self.msg_buffer:
+            if msg.id < client.last_got_msg_id:
+                text += msg.msg + '\n'
+                client.last_got_msg_id = msg.msg_id
+        if private_messages := self.private_msg.get(client.name):
+            for msg in private_messages:
+                text += msg + '\n'
+        return text
+
+    async def on_first_connect_get_last_messages(self, client: ServersClientModel) -> str:
+        """Send all messages from buffer for new user and mark last sent message id to user"""
+        text = ''
+        for msg in self.msg_buffer:
+            text += msg.msg + '\n'
+            client.last_got_msg_id = msg.msg_id
+        return text
+
     async def connect(self, request: Request) -> Response:
-        client = ServersClientModel.parse_obj(await request.json())
-        self.connected_clients.append(client)
-        return Response(text='Connected')
+        """
+        If the user has previously connected, it gets it from disconnected_clients,
+        if the user for the first time then creates a new ServerClientModel for it and places
+        it in connected_clients.
+        """
+        logger.info(f'{request.method} {self.host}:{self.port}{request.path}')
+        try:
+            client = ServersClientModel.parse_obj(json.loads(request.body))
+        except Exception as ex:
+            logger.error(ex)
+        if clt := self.disconnected_clients.get(client.id):
+            self.connected_clients[clt.id] = clt
+            text = await self.on_connect_get_updates(client)
+        self.connected_clients[client.id] = client
+        text = await self.on_first_connect_get_last_messages(client)
+        return Response(text=text)
 
-    @swagger_path('swagger_docs/get_message.yaml')
-    async def get_message(self, request: Request) -> Response:
-        msg = MessageModel.parse_obj(await request.json())
-        client = [c for c in self.connected_clients if c.id == msg.id]
-        self.set_msg_over_limit_status(client[0])
-        if not client[0].over_limit:
-            client[0].sent_messages += 1
-            self.msg_id += 1
-            msg.msg_id = self.msg_id
-            self.add_to_msg_buffer(msg)
-            return Response()
-        return Response(text='!!!Server: Exceeded messages limit. Wait hour')
-
-    @swagger_path('swagger_docs/get_message_to_user.yaml')
-    async def get_message_to_user(self, request: Request) -> Response:
-        msg = MessageModel.parse_obj(await request.json())
-        client = [c for c in self.connected_clients if c.id == msg.id]
-        self.set_msg_over_limit_status(client[0])
-        if not client[0].over_limit:
-            client[0].sent_messages += 1
-            to_user = msg.to_user
-            self.msg_to_user[to_user] = f'***{msg.name}***: {msg.msg}'
-            return Response()
-        return Response(text='!!!Server: Exceeded messages limit. Wait hour')
-
-    @swagger_path('swagger_docs/send_messages_from_buffer.yaml')
-    async def send_messages_to_users_from_buffer(self, request: Request) -> Response:
-        client = ServersClientModel.parse_obj(await request.json())
-        if client not in self.connected_clients:
-            if self.messages_bufer:
-                text = ''
-                for msg in self.messages_bufer[:-1]:
-                    text += f'{msg.name}: {msg.msg}\n'
-                last = self.messages_bufer[-1]
-                text += f'{last.name}: {last.msg}'
-                self.client_id_of_last_received_msg[client.id] = last.msg_id
-                return Response(text=text)
+    async def close(self, request: Request) -> Response:
+        logger.info(f'{request.method} {self.host}:{self.port}{request.path}')
+        clnt = json.loads(request.body)
+        client = self.connected_clients[clnt['id']]
+        self.disconnected_clients[client.id] = client
+        del self.connected_clients[client.id]
         return Response()
 
-    @swagger_path('swagger_docs/send_update.yaml')
-    async def send_update(self, request: Request) -> Response:
-        client = ServersClientModel.parse_obj(await request.json())
-        if self.msg_to_user.get(client.name, None):
-            msg = self.msg_to_user.get(client.name)
-            del self.msg_to_user[client.name]
+    async def get_status(self, request: Request) -> Response:
+        logger.info(f'{request.method} {self.host}:{self.port}{request.path}')
+        text = f'Server status: OK. {len(self.connected_clients)} user(s) are(is) connected to server'
+        return Response(text=text)
+
+    async def send_private_message(self, client_name: str):
+        if messages := self.private_message.get(client_name):
+            return messages.pop()
+        return None
+
+    async def get_update(self, request: Request) -> Response:
+        """Send last unreceived messages and marks last send message id for user"""
+        logger.info(f'{request.method} {self.host}:{self.port}{request.path}')
+        clnt = json.loads(request.body)
+        client = self.connected_clients[clnt['id']]
+        if msg := await self.send_private_message(client.name):
             return Response(text=msg)
-        last_send_msg_id = self.client_id_of_last_received_msg.get(client.id, 0)
-        for m in self.messages_bufer:
-            if m.msg_id > last_send_msg_id:
-                self.client_id_of_last_received_msg[client.id] = m.msg_id
-                return Response(text=f'{m.name}: {m.msg}')
+        for msg in self.msg_buffer:
+            if msg.msg_id > client.last_got_msg_id:
+                client.last_got_msg_id = msg.msg_id
+                return Response(text=msg.msg)
         return Response()
 
-    @swagger_path('swagger_docs/close_connect.yaml')
-    async def del_client_from_connected_list(self, request: Request) -> Response:
-        client = ServersClientModel.parse_obj(await request.json())
-        self.connected_clients.remove(client)
+    async def send(self, request: Request) -> Response:
+        """Get messages from users for all users"""
+        logger.info(f'{request.method} {self.host}:{self.port}{request.path}')
+        try:
+            message = MessageModel.parse_obj(json.loads(request.body))
+        except Exception as ex:
+            logger.error(ex)
+        self.msg_id += 1
+        message.msg_id = self.msg_id
+        self.add_message_to_buffer(message)
         return Response()
 
-    async def prepare_data_for_saving_file(self, data: bytes) -> dict:
-        """Return the filename and file format"""
-        file_bytes = re.findall(b'\\r\\n\\r\\n.*', data, flags=re.S)
-        file_bytes = file_bytes[0].strip()
-        file_info = re.findall(b'\w*%20\w*-\w*-\w*-\w*-\w*%20\w*', data)  # noqa: W605
-        file_info = file_info[0].decode()
-        user_name, user_id, file_format = file_info.split('%20')
-        return {'file': file_bytes, 'name': user_name, 'id': user_id, 'file_format': file_format}
-
-    async def write_file(self, file_data: dict) -> None:
-        """Saves the file sent by the client to disk"""
-        if not os.path.exists('files'):
-            os.mkdir('files')
-        filename = '{0}-{1}.{2}'.format(file_data['name'], file_data['id'], file_data['file_format'])
-        self.sent_files_to_user[filename] = [file_data['id']]
-        if filename in self.files:
-            self.files.remove(filename)
-        self.files.append(filename)
-        with open(f'files/{filename}', 'wb') as file:
-            file.write(file_data['file'])
-
-    async def read_file(self, filename: str) -> bytes:
-        """Reads file data from disk to send it"""
-        with open(f'files/{filename}', 'rb') as file:
-            data = file.read()
-        return data
-
-    @swagger_path('swagger_docs/get_file.yaml')
-    async def get_file(self, request: Request) -> Response:
-        data = await request.read()
-        file_data = await self.prepare_data_for_saving_file(data)
-        await self.write_file(file_data)
-        return Response()
-
-    @swagger_path('swagger_docs/send_file.yaml')
-    async def send_file(self, request: Request):
-        client = ServersClientModel.parse_obj(await request.json())
-        for file in self.files:
-            if client.id in self.sent_files_to_user.get(file):
-                continue
-            self.sent_files_to_user[file].append(client.id)
-            data = await self.read_file(file)
-            from_user, file_format = file.split('.')
-            text = f'from-{from_user}.{file_format}'
-            return Response(body=text.encode() + data)
-        return Response()
-
-    def update_limit(self, client: ServersClientModel) -> bool:
-        """
-        Checks if the time required to update the message sending limit has passed.
-        If the time has come, update the limit.
-        """
-        if client.limit_update_time < time.time():
-            client.sent_messages = 0
-            return True
-        return False
-
-    def set_msg_over_limit_status(self, client: ServersClientModel) -> None:
-        """
-        Checks if the limit for sending messages has been exceeded and, if exceeded, sets
-        the limit exceeded status for the client.
-        """
-        if client.sent_messages >= MSG_LIMIT and not client.over_limit:
-            client.over_limit = True
-            client.limit_update_time = time.time() + LIMIT_UPDATE_PERIOD
-        elif client.over_limit and self.update_limit(client):
-            client.over_limit = False
-
-    def add_to_msg_buffer(self, msg: MessageModel) -> None:
-        """Store new message to buffer if buffer overflowed delete the oldest message"""
-        if len(self.messages_bufer) < BUFFER_SIZE:
-            self.messages_bufer.append(msg)
+    async def send_to(self, request: Request) -> Response:
+        """Get messages from users to certain user"""
+        logger.info(f'{request.method} {self.host}:{self.port}{request.path}')
+        try:
+            message_model = MessageModel.parse_obj(json.loads(request.body))
+        except Exception as ex:
+            logger.error(ex)
+        msg = f'***{message_model.name}***:{message_model.msg}'
+        if not self.private_message.get(message_model.to_user):
+            self.private_message[message_model.to_user] = [msg]
         else:
-            self.messages_bufer.pop()
-            self.messages_bufer.append(msg)
+            self.private_message[message_model.to_user].append(msg)
+        return Response()
 
-    def init_routes(self) -> None:
-        self.app.add_routes([
-            self.server.post('/send', self.get_message),
-            self.server.post('/send-to', self.get_message_to_user),
-            self.server.post('/connect', self.connect),
-            self.server.get('/status', self.send_status),
-            self.server.post('/get-messages', self.send_messages_to_users_from_buffer),
-            self.server.post('/get-update', self.send_update),
-            self.server.post('/close', self.del_client_from_connected_list),
-            self.server.post('/send-file', self.get_file),
-            self.server.post('/get-file', self.send_file)
-        ])
+    async def on_request(self, reader: StreamReader, writer: StreamWriter):
+        request = await self.parse_request(reader)
+        coro = self.routes.get(request.path)
+        r = await coro(request)
+        resonse = r.create_response()
+        try:
+            writer.write(resonse)
+            writer.close()
+        except Exception as ex:
+            logger.error(ex)
 
-    def run(self) -> None:
-        self.init_routes()
-        setup_swagger(self.app, swagger_url="/api/v1/doc", ui_version=2, title=TITLE)
-        self.server.run_app(self.app, host=self.host, port=self.port)
+    async def run(self):
+        srv = await asyncio.start_server(self.on_request, self.host, self.port)
+        async with srv:
+            logger.info(f'Server started at {self.host}:{self.port}')
+            await srv.serve_forever()
 
 
 if __name__ == '__main__':
     server = Server()
-    server.run()
+    asyncio.run(server.run())
