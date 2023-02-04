@@ -46,8 +46,10 @@ class Server:
         method, path, *_ = raw[0].decode().split(' ')
         if method.upper() == 'GET':
             return Request(method=method, path=path)
+        length_raw = re.findall(b'Content-Length:\s\d*', head)  # noqa: W605
+        length = int(length_raw[0].decode().split(' ')[1])
         try:
-            body = await reader.readuntil(separator=b'}')
+            body = await reader.read(n=length)
         except Exception as ex:
             logger.error(ex)
         return Request(method=method, path=path, body=body)
