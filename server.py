@@ -42,8 +42,8 @@ class Server:
             head = await reader.readuntil(separator=b'\r\n\r\n')
         except Exception as ex:
             logger.error(ex)
-            raw = re.findall(b'\w*\s/\w*\s\w*/\d.\d', head)  # noqa: W605
-            method, path, *_ = raw[0].decode().split(' ')
+        raw = re.findall(b'\w*\s/\w*\s\w*/\d.\d', head)  # noqa: W605
+        method, path, *_ = raw[0].decode().split(' ')
         if method.upper() == 'GET':
             return Request(method=method, path=path)
         try:
@@ -56,12 +56,13 @@ class Server:
         """Send unreceived messages to user with a new connection of an existing user"""
         text = ''
         for msg in self.msg_buffer:
-            if msg.id < client.last_got_msg_id:
+            if msg.msg_id > client.last_got_msg_id:
                 text += msg.msg + '\n'
                 client.last_got_msg_id = msg.msg_id
-        if private_messages := self.private_msg.get(client.name):
+        if private_messages := self.private_message.get(client.name):
             for msg in private_messages:
                 text += msg + '\n'
+            del self.private_message[client.name]
         return text
 
     async def on_first_connect_get_last_messages(self, client: ServersClientModel) -> str:
@@ -84,8 +85,12 @@ class Server:
         except Exception as ex:
             logger.error(ex)
         if clt := self.disconnected_clients.get(client.id):
+            logger.info(f'User {client.id} already exists')
             self.connected_clients[clt.id] = clt
-            text = await self.on_connect_get_updates(client)
+            del self.disconnected_clients[client.id]
+            text = await self.on_connect_get_updates(clt)
+            return Response(text=text)
+        logger.info(f'New user: {client.id} connected')
         self.connected_clients[client.id] = client
         text = await self.on_first_connect_get_last_messages(client)
         return Response(text=text)
@@ -140,7 +145,7 @@ class Server:
             message_model = MessageModel.parse_obj(json.loads(request.body))
         except Exception as ex:
             logger.error(ex)
-        msg = f'***{message_model.name}***:{message_model.msg}'
+        msg = f'***{message_model.name}***: {message_model.msg}'
         if not self.private_message.get(message_model.to_user):
             self.private_message[message_model.to_user] = [msg]
         else:

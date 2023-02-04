@@ -44,7 +44,9 @@ class Client:
     async def send_to(self, data: str) -> None:
         """Send message for certain user"""
         path = self.base_path + 'sendto'
-        _, to_user, message = data.split(' ')
+        _, to_user, *message = data.split(' ')
+        if isinstance(message, list):
+            message = ' '.join(message)
         try:
             msg = MessageModel(name=self.name, id=self.id, msg=message, to_user=to_user)
             await self.sesion.post(path, data=msg.json())
