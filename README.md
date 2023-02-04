@@ -72,7 +72,7 @@ Get status of server and number connected clients
 <summary> Description </summary>
 
 ##### Requires:
-`{'name': string, 'id': string, 'msg': string}`
+`{'name': string, 'id': string}`
 
 Delete user fro connected clients list
 
